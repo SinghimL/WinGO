@@ -12,8 +12,9 @@ class Geometrisation:
 
         :param wingsail_parameters: Wingsail parameters list
         :param refinement_level:    Refinement level of the geometry, default as 1
-        :param uniform_mesh:        True to uniform the mesh with 100 panels, default as True
+        :param uniform_mesh:        Bool for uniform the mesh to 100 panels * refinement level, default as True
         """
+        # Verify input parameters
         if not len(wingsail_parameters) == 19:
             raise TypeError("wingsail_parameters: Should have 19 parameters as input")
         if not isinstance(refinement_level, int) or refinement_level < 1 or refinement_level > 9:
@@ -49,31 +50,32 @@ class Geometrisation:
             print(f":wrench: [deep_sky_blue1]Adjustment:[/deep_sky_blue1] Number of geometry layer has uniformed to {str(100 * refinement_level)}.")
             print(":wrench: [deep_sky_blue1]Adjustment:[/deep_sky_blue1] All sections height are rounded to 2 decimal places.")
 
-        # Prepare geometry parameters
-        self.key_section_heights  = np.array([0, self.height_low, self.height_mid, self.height_upp, self.span]) # + self.clearance_ow
+        # Prepare characteristic parameters
+        self.key_section_heights  = np.array([0, self.height_low, self.height_mid, self.height_upp, self.span])
         self.key_section_chords   = np.array([self.chord_bot, self.chord_low, self.chord_mid, self.chord_upp, self.chord_tip])
         self.refinement_level     = refinement_level
-        self.panel_num            = self.solve_section()
-        self.profile_bottom       = self.naca_sketch(self.naca_bot)
-        self.profile_low          = self.naca_sketch(self.naca_low, self.offset_low)
-        self.profile_mid          = self.naca_sketch(self.naca_mid, self.offset_mid)
-        self.profile_upp          = self.naca_sketch(self.naca_upp, self.offset_upp)
-        self.profile_tip          = self.naca_sketch(self.naca_tip, self.offset_tip)
+        self.panel_num            = self._solve_section()
+        self.profile_bottom       = self._naca_sketch(self.naca_bot)
+        self.profile_low          = self._naca_sketch(self.naca_low, self.offset_low)
+        self.profile_mid          = self._naca_sketch(self.naca_mid, self.offset_mid)
+        self.profile_upp          = self._naca_sketch(self.naca_upp, self.offset_upp)
+        self.profile_tip          = self._naca_sketch(self.naca_tip, self.offset_tip)
         self.key_section_profiles = np.array([self.profile_bottom, self.profile_low, self.profile_mid, self.profile_upp, self.profile_tip]) \
                                     * self.key_section_chords[:, np.newaxis, np.newaxis]
         
         # Arrange geometry axes coordinates
-        self.section_x_coords, self.section_y_coords, self.section_z_coords, self.section_2d_coords = self.geometry_coordinates()
+        self.section_x_coords, self.section_y_coords, self.section_z_coords, self.section_2d_coords = self._geometry_coordinates()
 
     # NACA airfoil coordinates preparation
-    def naca_sketch(self, naca_code: int, x_offset: float = 0.0) -> np.ndarray:
+    def _naca_sketch(self, naca_code: int, x_offset: float = 0.0) -> np.ndarray:
         """
         Coordinates builder for symmetrical 4-digit NACA airfoil profile.
 
         :param naca_code: The last two digits of symmetrical 4-digit NACA airfoile
+        :param x_offset:  The section offset scale versus chord on x coordinates
         :return:          The x, y coordinates of the airfoil profile
         """
-        # Nonlinear x distribution
+        # Generate non-linear x distribution for better resolution on leading and trialing edge
         if self.uniform_bool:
             datapoint_density = 50
         else:
@@ -93,7 +95,7 @@ class Geometrisation:
         y_lower = np.column_stack((x[::-1], -yt[::-1]))
         trailing_radius = yt[-1]
 
-        # Polish trailing
+        # Polish trailing edge coordinates
         x_trailing = np.array([(1 + trailing_radius * 0.5 + x_offset), (1 + trailing_radius * 0.866 + x_offset),
                         (1 + trailing_radius + x_offset), (1 + trailing_radius * 0.866 + x_offset),
                         (1 + trailing_radius * 0.5 + x_offset)])
@@ -106,15 +108,12 @@ class Geometrisation:
         return airfoil_coordinates
 
     # Model required sections calculation
-    def solve_section(self)-> int:
+    def _solve_section(self)-> int:
         """
         Calculate geometry panels number and section spacing ratio based on heights and refinement level.
 
-        :param section_heights:    The height of each section in numpy array, order from root to tip
-        :param refinement_level: The refinement level of the geometry, default is 5
-        :return:                 The number of panels and the section spacing ratio
+        :return: The number of subdivided panels
         """
-        # Calculate spacing deltas and ratio
         if self.uniform_bool:
             panel_num = 100 * self.refinement_level
         else:
@@ -127,7 +126,7 @@ class Geometrisation:
         return panel_num
 
     # Section x, y coordinates interpolation
-    def coordinates_pchip(self, x_keys: np.ndarray, y_keys: np.ndarray,
+    def _coordinates_pchip(self, x_keys: np.ndarray, y_keys: np.ndarray,
                         z_keys: np.ndarray, z_all: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
         A parametric PCHIP interpolation function, returns the interpolated x and y coordinates for the given dense z.
@@ -136,7 +135,7 @@ class Geometrisation:
         :param y_keys: The user defined key y coordinates of the datapoints
         :param z_keys: The user defined key z coordinates of the datapoints
         :param z_all:  The z coordinates (sections height) of the complete datapoints to interpolate
-        :return: Interpolated x and y coordinates
+        :return:       The interpolated x and y coordinates
         """
         from scipy import interpolate
         x_interp = interpolate.PchipInterpolator(z_keys, x_keys)
@@ -147,12 +146,13 @@ class Geometrisation:
         return x_interpolated, y_interpolated
 
     # Geometry 3D coordinates generation and reorganisation
-    def geometry_coordinates(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def _geometry_coordinates(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Arrange the x, y, z coordinates tuple based on the input parameters and repack into 3D array.
 
         :return: The x, y, z coordinates of the geometry and repacked 3D array
         """
+        # Prepare section coordinates
         section_x_coords = []
         section_y_coords = []
         section_z_heights = np.linspace(0, 1, self.panel_num + 1) * self.span
@@ -161,7 +161,7 @@ class Geometrisation:
 
         # Interpolate x, y coordinates for each section
         for i in range(key_section_x_coords.shape[0]):
-            x_interpolated, y_interpolated = self.coordinates_pchip(key_section_x_coords[i], key_section_y_coords[i],
+            x_interpolated, y_interpolated = self._coordinates_pchip(key_section_x_coords[i], key_section_y_coords[i],
                                                                     self.key_section_heights, section_z_heights)
             section_x_coords.append(x_interpolated)
             section_y_coords.append(y_interpolated)
@@ -183,21 +183,18 @@ class Geometrisation:
         """
         Generate a closed STL file from the given coordinates with optional top and bottom caps.
         
-        :param x_coords: The complete x coordinate datapoint
-        :param y_coords: The complete y coordinate datapoint
-        :param z_coords: The complete z coordinate datapoint
-        :param save_as:  The path to save the generated stl. file
-        :param add_lid:  True to add cap and bottom to the 3D model
+        :param path:    The path to save the generated 3D model
+        :param add_lid: True to add cap and bottom to the 3D model
         """
         from stl import mesh
-        # Perpare triangular faces property       
+        # Perpare triangular faces property
         x_coords, y_coords, z_coords = self.section_x_coords, self.section_y_coords, self.section_z_coords
         datapoint_num, layer_num = x_coords.shape
         side_faces = datapoint_num * (layer_num - 1) * 2
         lid_faces = datapoint_num * 2 if add_lid else 0
         total_faces = side_faces + lid_faces
 
-        # Define geometry mesh shape
+        # Instantiation geometry mesh function from numpy-stl
         geometry = mesh.Mesh(np.zeros(total_faces, dtype=mesh.Mesh.dtype))
 
         # Assign side face vectors
@@ -239,12 +236,9 @@ class Geometrisation:
     # Geometry 3D visualization with matplotlib
     def plot3d(self):
         """
-        Plot point could to 3D axes.
-
-        :param x_coords: The complete x coordinate datapoints
-        :param y_coords: The complete y coordinate datapoints
-        :param z_coords: The complete z coordinate datapoints
+        Plot point cloud to 3D axes.
         """
+        # Initialize 3D plot function
         x_coords, y_coords, z_coords = self.section_x_coords, self.section_y_coords, self.section_z_coords
         fig = plt.figure(figsize=(12, 8))
         ax = fig.add_subplot(111, projection='3d')
@@ -285,16 +279,14 @@ class Calculation:
         :param refinement_level:    Refinement level of the geometry, default as 1
         :param xfoil_root:          The path to the xfoil executable program
         """
+        # Verify input parameters
         if not isinstance(refinement_level, int) or refinement_level < 1 or refinement_level > 9:
             raise TypeError("refinement_level: Have to be an integer and in the range of 1 to 9")
-        # Map class attributes
-        self.xfoil_root = xfoil_root
-        self.wingsail_id = f"Wingsail Parameters: {str(wingsail_parameters)}\nRefinement Level: {str(refinement_level)}"
-        
-        # Define initial physical constants
         if len(physical_constants) != 19:
             print(f":construction: [bright_yellow]Notification:[/bright_yellow] Input physical constants incomplete, reset to default values.")
             physical_constants = (2e-4, 1.205, 15.06e-6, 0.85, [5, 10, 1], [5, 10, 1], [30, 150, 10]) # Setup default physical constants
+        
+        # Define initial physical constants
         self.sea_surface_roughness   = physical_constants[0]
         self.air_density             = physical_constants[1]
         self.air_kinematic_viscosity = physical_constants[2]
@@ -302,6 +294,10 @@ class Calculation:
         self.vessel_speed_range      = physical_constants[4]
         self.true_wind_speed_range   = physical_constants[5]
         self.true_wing_angle_range   = physical_constants[6]
+
+        # Map class attributes
+        self.xfoil_root = xfoil_root
+        self.wingsail_id = f"Wingsail Parameters: {str(wingsail_parameters)}\nRefinement Level: {str(refinement_level)}"
 
         # Unpackage and globalise key variables
         self.refinement_level = refinement_level
@@ -313,7 +309,7 @@ class Calculation:
         self.span = self.class_geometrisation.span
 
         # Globalise geometry specification and physical model result
-        self.section_chords, self.panel_areas, self.project_area, self.aspect_ratio = self.solve_wing_spec()
+        self.section_chords, self.section_reorganised_coords, self.panel_areas, self.aspect_ratio = self.solve_wing_spec()
 
     # Wingsail geometry sepcification calculation
     def solve_wing_spec(self) -> Tuple[np.ndarray, np.ndarray, float, float]:
@@ -322,15 +318,21 @@ class Calculation:
 
         :return: The chord length and project area of each section, wingsail total area and aspect ratio
         '''
-        # Calculate chord length of each section
-        section_chords, panel_areas = [], []
+        # Calculate chord length and reorganise 2D coordinates for Xfoil/Neuralfoil analysis of each section
+        section_chords, section_reorganised_coords, panel_areas = [], [], []
         for i in range(self.section_num):
-            leading_index = int((len(self.section_2d_coords[i]) + 1) / 2)
-            leading_x_coord = (self.section_2d_coords[i])[leading_index, 0]
-            trailing_x_coord = (self.section_2d_coords[i])[1, 0]
-            section_chord = trailing_x_coord - leading_x_coord
-            section_chords.append(section_chord)
-        section_chords = np.array(section_chords)
+            # Chord length calculation
+            section_x_coords = (self.section_2d_coords[i])[:, 0]
+            section_y_coords = (self.section_2d_coords[i])[:, 1]
+            leading_x_coord = np.min(section_x_coords)
+            offsetted_x_coords = section_x_coords - leading_x_coord
+            section_scale = offsetted_x_coords[0]
+            # Reorganise 2D coordinates
+            reorganised_x_coords = offsetted_x_coords / section_scale
+            reorganised_y_coords = section_y_coords / section_scale
+            reorganised_2d_coords = np.column_stack((reorganised_x_coords, reorganised_y_coords))
+            section_chords.append(section_scale)
+            section_reorganised_coords.append(reorganised_2d_coords)
 
         # Calculate wing area
         panel_height = np.round(np.diff(self.section_heights)[0], 5)
@@ -342,7 +344,7 @@ class Calculation:
         # Calculate aspect ratio
         aspect_ratio = self.span ** 2 / project_area
 
-        return np.array(section_chords), np.array(panel_areas), project_area, aspect_ratio
+        return np.array(section_chords), np.array(section_reorganised_coords), np.array(panel_areas), aspect_ratio
 
     # Reynolds number and wind speed distribution calculation
     def renv_distribution(self, vessel_speed: float, true_wind_speed: float, true_wind_angle: float) -> Tuple[np.ndarray, np.ndarray, float]:
@@ -369,12 +371,69 @@ class Calculation:
 
         return np.round(reynolds), apperent_wind_speeds, apperent_wind_angle
 
+    def max_thrust_with_neuralfoil(self, sailing_condition: list, alpha_range: list = [1, 25, 1], network_model: str = 'xlarge') -> Tuple[float, float]:
+        # Import dependence library
+        import neuralfoil
+
+        # Unpackage sailing condition and calculate Reynolds number distribution
+        vessel_speed, true_wind_speed, true_wind_angle = sailing_condition
+        reynolds, apperent_wind_speeds, apperent_wind_angle = self.renv_distribution(vessel_speed, true_wind_speed, true_wind_angle)
+        full_aoa_range = np.arange(alpha_range[0], alpha_range[1] + alpha_range[2], alpha_range[2])
+
+        # Execute xfoil calculation for each section
+        calculation_gap = int(self.refinement_level * 4)
+        involved_section_num = int(self.class_geometrisation.panel_num / calculation_gap + 1) # 26 sections are involved in cl, cd calculation
+        aoa_all_sections, cl_all_sections, cd_all_sections = [], [], []
+        for i in range(involved_section_num):
+            section_index = int(i * calculation_gap)
+            neuralfoil_output = neuralfoil.get_aero_from_coordinates(coordinates = self.section_reorganised_coords[section_index],
+                                                                  alpha = full_aoa_range,
+                                                                  Re = reynolds[section_index],
+                                                                  model_size = network_model)
+            aoa_all_sections.append(full_aoa_range)
+            cl_all_sections.append(neuralfoil_output["CL"])
+            cd_all_sections.append(neuralfoil_output["CD"])
+        clcd_all_in_one = np.dstack((np.array(aoa_all_sections).T, np.array(cl_all_sections).T, np.array(cd_all_sections).T))
+
+        # Calculate thrust for each angle of attack
+        wingsail_thrusts = []
+        for i in range(len(clcd_all_in_one)):
+            panel_lifts, panel_drags = [], []
+            for j in range(len(clcd_all_in_one[i])):
+                cl_2d, cd_2d = clcd_all_in_one[i][j][1], clcd_all_in_one[i][j][2]
+                dynamic_pressure = 0.5 * self.air_density * apperent_wind_speeds[int(j * calculation_gap)] ** 2
+                if j == 0:
+                    panel_area = np.sum(self.panel_areas[:int(2 * self.refinement_level)])
+                elif j == len(clcd_all_in_one[i]) - 1:
+                    panel_area = np.sum(self.panel_areas[int(-2 * self.refinement_level):])
+                else:
+                    panel_area = np.sum(self.panel_areas[int(self.refinement_level * (4 * j - 2)): int(self.refinement_level * (4 * j + 2))])
+                cl_3d = cl_2d / (1 + 2 / (self.span_effciency * self.aspect_ratio))
+                panel_lift = dynamic_pressure * panel_area * cl_3d
+                cd_induced = cl_3d ** 2 / (np.pi * self.span_effciency * self.aspect_ratio)
+                panel_drag = dynamic_pressure * panel_area * (cd_2d + cd_induced)
+                panel_lifts.append(panel_lift)
+                panel_drags.append(panel_drag)
+            wingsail_lift = np.sum(panel_lifts)
+            wingsail_drag = np.sum(panel_drags)
+            wingsail_thrust = wingsail_lift * np.sin(np.deg2rad(apperent_wind_angle)) - wingsail_drag * np.cos(np.deg2rad(apperent_wind_angle))
+            wingsail_thrusts.append(wingsail_thrust)
+            # print(f"[b dark_orange]Debug -[/b dark_orange] Wingsail thrust at AoA {i + 1} deg: {np.round(wingsail_thrust, 3)} N")
+
+        # Find the maximum thrust and corresponding angle of attack
+        max_thrust = np.max(wingsail_thrusts)
+        max_thrust_index = np.argmax(wingsail_thrusts)
+        max_angle_of_attack = full_aoa_range[max_thrust_index]
+
+        return max_thrust, max_angle_of_attack
+
+
     # Wingsail thrust calculation with given sailing condition
     def max_thrust_with_xfoil(self, sailing_condition: list, alpha_range: list = [1, 25, 1], xfoil_iteration: int = 200) -> Tuple[float, float]:
         """
         Calculate the maximum thrust of the wingsail with given sailing condition.
 
-        :param sailing_condition: The sailing condition list with vessel speed, true wind speed and true wind angle
+        :param sailing_condition: The sailing condition list: [vessel speed, true wind speed, true wind angle]
         :param alpha_range:       The angle of attack range for xfoil calculation
         :param xfoil_iteration:   The iteration number for xfoil calculation
         :return:                  The maximum thrust and the corresponding angle of attack
@@ -414,9 +473,9 @@ class Calculation:
             section_name = f"sec_{(section_index + 1):03}"
             section_dir = os.path.join(sail_path, section_name)
             os.makedirs(section_dir)
-            np.savetxt(os.path.join(section_dir, f"{section_name}.dat"), self.section_2d_coords[section_index], fmt='%1.7f')
+            np.savetxt(os.path.join(section_dir, f"{section_name}.dat"), self.section_reorganised_coords[section_index], fmt='%1.7f')
             reynold = reynolds[section_index]
-            aoas, cls, cds = self.call_xfoil(section_name, section_dir, xfoil_dir, reynold, alpha_range, xfoil_iteration, False)
+            aoas, cls, cds = self.call_xfoil(section_name, section_dir, xfoil_dir, reynold, alpha_range, xfoil_iteration, pane=True)
             aoa_all_sections.append(aoas)
             cl_all_sections.append(cls)
             cd_all_sections.append(cds)
@@ -603,6 +662,10 @@ class Calculation:
             # Change back to original directory
             os.chdir(original_dir)
 
+    def debug(self):
+        print(f"\n[b dark_orange]Debug -[/b dark_orange] This function is reserved for debugging.")
+        return 
+
 # Further development plan
 # class Prediction:
 # class Verification:
@@ -659,22 +722,15 @@ class ConfigXfoil:
                 print(f":inbox_tray: Xfoil has been deployed at: [b light_green]{xfoil_path}[/b light_green]\n")
             elif platform.system() == 'Linux':
                 self.compile_xfoil(self.deploy_dir)
-                xfoil_path = os.path.join(self.deploy_dir, 'xfoil')
-                print(f":inbox_tray: Xfoil has been deployed at: [b light_green]{xfoil_path}[/b light_green]\n")
             else:
                 xfoil_path = None
-                raise NotImplementedError("Xfoil deployment only supported on Windows and Linux")
+                raise NotImplementedError("Xfoil call funtion only supported on Windows and Linux")
 
         return self.deploy_dir
 
     # Xfoil compilation for Linux
     def compile_xfoil(source_dir):
-        import platform
-        import subprocess
-        if platform.system() == 'Linux':
-            subprocess.run(['make'], cwd=source_dir, check=True)
-        else:
-            raise NotImplementedError("Compilation only supported on Linux")
+        raise NotImplementedError(f"Please deploy Xfoil manually on Linux to: [b light_green]{source_dir}[/b light_green]\n")
 
     # Xfoil uninstallation
     def remove(self):
@@ -696,6 +752,7 @@ if __name__ == '__main__':
     sample_wingsail_1 = [4, 0, 1, 15, 0.2, 1, 15, 0, 0.5, 1, 15, 0, 0.8, 1, 12, 0, 0.5, 10, 0]
     sample_wingsail_2 = [3.5, 1, 1, 21, 0.5, 1.05, 21, 0, 0.8, 0.8, 18, 0.05, 0.93, 0.6, 15, 0.2, 0.35, 10, 0.4]
     sample_wingsail_3 = [60, 30, 15, 22, 0.45, 0.95, 20, 0.02, 0.75, 0.8, 20, 0.05, 0.95, 0.66, 17, 0.09, 0.4, 12, 0.16]
+    oracle_ac72 = [40, 3, 9, 20, 0.26, 1.03, 17, -0.15, 0.52, 0.96, 15, -0.21, 0.78, 0.76, 15, -0.15, 0.38, 12, 0.06]
 
     # Define physical constants
     SAILING_CONDITION = [7, 8, 50]
@@ -704,14 +761,14 @@ if __name__ == '__main__':
     REFINE_LEVEL = 1
 
     # Calculate the maximum thrust of the wingsail
-    wincal = Calculation(sample_wingsail_0, [], REFINE_LEVEL) # For Calculation class test
-    max_thrust, max_angle_of_attack = wincal.max_thrust_with_xfoil(SAILING_CONDITION, AOA_RANGE, XFOIL_ITER)
-    # max_thrust, max_angle_of_attack = wincal.debug(SAILING_CONDITION)
+    wincal = Calculation(oracle_ac72, [], REFINE_LEVEL) # For Calculation class test
+
+    max_thrust, max_angle_of_attack = wincal.max_thrust_with_neuralfoil(SAILING_CONDITION, AOA_RANGE, "xlarge")
+    # max_thrust, max_angle_of_attack = wincal.max_thrust_with_xfoil(SAILING_CONDITION, AOA_RANGE, XFOIL_ITER)
 
     print(f"\n:sailboat: Vessel speed: {SAILING_CONDITION[0]}")
     print(f":triangular_flag_on_post: Wind condition: {SAILING_CONDITION[1]} m/s at {SAILING_CONDITION[2]} deg")
     print(f":smiley: Max thrust of {np.round(max_thrust, 3)} N found at angle of attack: {max_angle_of_attack} deg\n")
-
     print(f":clock1: Cost time: {time.perf_counter() - t:8f} seconds!\n")
 
     """

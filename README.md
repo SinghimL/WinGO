@@ -33,4 +33,4 @@ This project is ispired from the hull form optimisation model [ShipD/ShipGen](ht
 
 ## Current functionalities:
 - Generate wingsail .stl mesh with 19 control parameters.
-- Calculate the generated thrust under given navigation conditions, with Xfoil.
+- Calculate the generated thrust under given navigation conditions, with [Xfoil](https://web.mit.edu/drela/Public/web/xfoil/) and [Neuralfoil](https://github.com/peterdsharpe/NeuralFoil).
