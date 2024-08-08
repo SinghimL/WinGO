@@ -1,0 +1,1 @@
+{"model_label": "Thrust_Regressor_V3", "input_dim": 22, "output_dim": 1, "latent_dim": 512, "network_structure": [512, 512, 512, 512], "epochs_num": 1500, "batch_size": 16384, "learning_rate": 0.0001, "weight_decay": 0.01, "vs_range": [6, 10, 1], "tws_range": [6, 10, 1], "twa_range": [30, 150, 10]}
