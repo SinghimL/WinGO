@@ -216,9 +216,9 @@ class _RegressionResNet(torch.nn.Module):
         return x
     
     def _link(self, input_dim, output_dim):
-        return nn.Sequential(nn.Linear(input_dim,output_dim),
+        return nn.Sequential(nn.Linear(input_dim, output_dim),
                              nn.SiLU(),
-                             nn.LayerNorm(input_dim),
+                             nn.LayerNorm(output_dim),
                              # nn.Dropout(p = 0.1)
                              nn.Dropout(p=0.1) if self.training else nn.Identity())
 
